@@ -81,6 +81,12 @@ class Order(BaseModel):
     warehouse: Optional[str] = None
     category: Optional[str] = None
 
+class CreateOrderRequest(BaseModel):
+    customer: str
+    items: List[dict]       # each item: {sku, name, quantity, unit_price}
+    warehouse: Optional[str] = None
+    category: Optional[str] = None
+
 class DemandForecast(BaseModel):
     id: str
     item_sku: str
@@ -160,6 +166,33 @@ def get_order(order_id: str):
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
     return order
+
+@app.post("/api/orders", response_model=Order)
+def create_order(order_req: CreateOrderRequest):
+    """Create a new restocking order and append it to the in-memory orders list"""
+    from datetime import datetime, timedelta
+    now = datetime.utcnow()
+    # Zero-pad order number based on current list length to avoid collisions
+    order_number = f"RST-{now.year}-{str(len(orders) + 1).zfill(4)}"
+    new_order = {
+        "id": str(len(orders) + 1),
+        "order_number": order_number,
+        "customer": order_req.customer,
+        "items": order_req.items,
+        "status": "Submitted",
+        "order_date": now.isoformat(),
+        # Fixed 14-day lead time per business requirement
+        "expected_delivery": (now + timedelta(days=14)).isoformat(),
+        "total_value": sum(
+            item.get("quantity", 0) * item.get("unit_price", 0)
+            for item in order_req.items
+        ),
+        "warehouse": order_req.warehouse,
+        "category": order_req.category,
+        "actual_delivery": None
+    }
+    orders.append(new_order)
+    return new_order
 
 @app.get("/api/demand", response_model=List[DemandForecast])
 def get_demand_forecasts():
